@@ -300,14 +300,26 @@ function setLoading(btn,on,txt=''){if(!btn)return;btn.disabled=on;btn.innerHTML=
 async function api(params,body=null){
   const url=lget('et_api_url','');
   if(!url)throw new Error('URL non configurato');
-  // Tutto via GET per evitare CORS preflight con Google Apps Script
   const merged={...params};
   if(body)merged.payload=JSON.stringify(body);
   const qs=new URLSearchParams(merged).toString();
-  const res=await fetch(`${url}?${qs}`,{method:'GET'});
-  const data=await res.json();
-  if(!data.ok)throw new Error(data.error||'Errore API');
-  return data;
+  // Timeout 15 secondi — Google Apps Script può essere lento
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),15000);
+  try{
+    const res=await fetch(`${url}?${qs}`,{method:'GET',signal:controller.signal});
+    clearTimeout(timer);
+    const text=await res.text();
+    let data;
+    try{data=JSON.parse(text);}
+    catch(e){throw new Error('Risposta non valida dal server: '+text.slice(0,100));}
+    if(!data.ok)throw new Error(data.error||'Errore API');
+    return data;
+  }catch(e){
+    clearTimeout(timer);
+    if(e.name==='AbortError')throw new Error('Timeout — il server non risponde. Riprova.');
+    throw e;
+  }
 }
 
 // ── AI (rule-based) ───────────────────────────────────────────
@@ -920,9 +932,17 @@ function openRecord(defaultType='expense',existing=null){
     if(!descI.value.trim()){errEl.textContent='Descrizione mancante';errEl.style.display='block';return;}
     errEl.style.display='none';setLoading(saveBtn,true);
     const rec={id:existing?.id||uid(),rtype:rtype.val,amount,description:descI.value.trim(),date:di.value,userId:userS.value,notes:notesI.value.trim(),sharedWith:[...sharedIds],sharedPcts:getSharedPcts(),categoryId:tf._catSel?.value||'',subcategory:tf._subSel?.value||'',detraibile730:tf._is730?tf._is730():false,incomeType:tf._incSel?.value||'stipendio',deductType:tf._dedSel?.value||'trattenuta_730',savingsType:tf._savSel?.value||'',savingsGoal:tf._savGoal?parseFloat(tf._savGoal.value)||0:0};
-    try{await api({action:'saveRecord',token:S.group.token},{record:rec});const idx=S.records.findIndex(r=>r.id===rec.id);if(idx>=0)S.records[idx]=rec;else S.records.unshift(rec);closeModal();renderPage();showToast(isEdit?'✅ Modificato!':'✅ Aggiunto!','success');}
-    catch(e){errEl.textContent=e.message;errEl.style.display='block';}
-    setLoading(saveBtn,false,isEdit?'Salva modifiche':'Aggiungi');
+    try{
+      await api({action:'saveRecord',token:S.group.token},{record:rec});
+      const idx=S.records.findIndex(r=>r.id===rec.id);
+      if(idx>=0)S.records[idx]=rec;else S.records.unshift(rec);
+      closeModal();renderPage();
+      showToast(isEdit?'✅ Modificato!':'✅ Aggiunto!','success');
+    }catch(e){
+      errEl.textContent='⚠ '+e.message;
+      errEl.style.display='block';
+      setLoading(saveBtn,false,isEdit?'Salva modifiche':'Aggiungi');
+    }
   };
   openModal(isEdit?'Modifica':'Nuova registrazione',wrap);
 }
