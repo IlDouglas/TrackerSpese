@@ -300,24 +300,31 @@ function setLoading(btn,on,txt=''){if(!btn)return;btn.disabled=on;btn.innerHTML=
 async function api(params,body=null){
   const url=lget('et_api_url','');
   if(!url)throw new Error('URL non configurato');
-  const merged={...params};
-  if(body)merged.payload=JSON.stringify(body);
-  const qs=new URLSearchParams(merged).toString();
-  // Timeout 15 secondi — Google Apps Script può essere lento
   const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),15000);
+  const timer=setTimeout(()=>controller.abort(),20000);
   try{
-    const res=await fetch(`${url}?${qs}`,{method:'GET',signal:controller.signal});
+    let res;
+    if(body){
+      // Operazioni di scrittura: usa no-cors workaround via GET con payload
+      // Google Apps Script non supporta CORS su POST da browser
+      const merged={...params,payload:JSON.stringify(body)};
+      const qs=new URLSearchParams(merged).toString();
+      res=await fetch(`${url}?${qs}`,{method:'GET',signal:controller.signal});
+    }else{
+      const qs=new URLSearchParams(params).toString();
+      res=await fetch(`${url}?${qs}`,{method:'GET',signal:controller.signal});
+    }
     clearTimeout(timer);
     const text=await res.text();
     let data;
     try{data=JSON.parse(text);}
-    catch(e){throw new Error('Risposta non valida dal server: '+text.slice(0,100));}
+    catch(e){throw new Error('Risposta non valida: '+text.slice(0,200));}
     if(!data.ok)throw new Error(data.error||'Errore API');
     return data;
   }catch(e){
     clearTimeout(timer);
-    if(e.name==='AbortError')throw new Error('Timeout — il server non risponde. Riprova.');
+    if(e.name==='AbortError')throw new Error('Timeout (20s) — il server non risponde. Riprova.');
+    if(e.message&&e.message.includes('fetch'))throw new Error('Connessione fallita. Verifica la connessione e riprova.');
     throw e;
   }
 }
@@ -595,7 +602,7 @@ function mkFeedCard(record){
   }).filter(Boolean);
   const tCol={expense:'var(--red)',income:'var(--green)',deduction:'var(--amber)',savings:'var(--blue)'}[record.rtype]||'var(--muted)';
   const icon=record.rtype==='expense'?(cat?.icon||'📦'):record.rtype==='income'?(INC_TYPES.find(t=>t.id===record.incomeType)?.icon||'💰'):record.rtype==='savings'?(SAV_TYPES.find(t=>t.id===record.savingsType)?.icon||'🐷'):(DED_TYPES.find(t=>t.id===record.deductType)?.icon||'⚖️');
-  const verb=record.rtype==='expense'?'ha speso':record.rtype==='income'?'ha ricevuto':record.rtype==='savings'?'ha risparmiato':'ha registrato';
+  const verb=record.rtype==='expense'?'ha speso':record.rtype==='income'?'ha ricevuto':record.rtype==='savings'?(record.savingsDeduct?'ha accantonato (−entrate)':'ha registrato risparmio'):'ha registrato';
   const card=el('div',{cls:'feed-card fade-up'});
 
   // Header
@@ -815,7 +822,8 @@ function renderStats(){
     }
     return s+r.amount;
   },0),tI=incomes.reduce((s,r)=>s+r.amount,0),tD=deductions.reduce((s,r)=>s+r.amount,0);
-  const net=tI-tD,bal=net-tE,t730=expenses.filter(r=>r.detraibile730).reduce((s,r)=>s+r.amount,0);
+  const tSavDeduct=savings.filter(r=>r.savingsDeduct).reduce((s,r)=>s+r.amount,0);
+  const net=tI-tD,bal=net-tE-tSavDeduct,t730=expenses.filter(r=>r.detraibile730).reduce((s,r)=>s+r.amount,0);
   // KPI
   // Savings KPI
   const savCard=el('div',{cls:'card',css:'background:#60a5fa0d;border:1.5px solid #60a5fa33;margin-bottom:10px'});
@@ -915,6 +923,19 @@ function openRecord(defaultType='expense',existing=null){
       // Obiettivo opzionale
       const{wrap:gw,inp:gi}=mkInp('Obiettivo (€, opzionale)',{type:'number',min:'0',placeholder:'es. 1000',value:existing?.savingsGoal||''});
       tf.appendChild(gw);tf._savGoal=gi;
+      // Sottrai dalle entrate?
+      const savCheckWrap=el('div',{cls:'field'});
+      savCheckWrap.appendChild(el('label',{cls:'lbl'},'Sottrai dalle entrate?'));
+      const savCheckRow=el('div',{css:'display:flex;gap:8px'});
+      let savDeduct=existing?.savingsDeduct||false;
+      ['Sì — accantonamento attivo','No — solo registrazione'].forEach((v,i)=>{
+        const isYes=i===0;
+        const btn=el('button',{css:`flex:1;padding:10px;border-radius:var(--rs);cursor:pointer;font-size:12px;font-weight:700;background:${savDeduct===isYes?'#60a5fa22':'var(--surf)'};color:${savDeduct===isYes?'var(--blue)':'var(--muted)'};border:1.5px solid ${savDeduct===isYes?'#60a5fa66':'var(--border)'}`,onclick:()=>{savDeduct=isYes;savCheckRow.querySelectorAll('button').forEach(b=>{b.style.background='var(--surf)';b.style.color='var(--muted)';b.style.borderColor='var(--border)';});btn.style.background='#60a5fa22';btn.style.color='var(--blue)';btn.style.borderColor='#60a5fa66';}},v);
+        savCheckRow.appendChild(btn);
+      });
+      savCheckWrap.appendChild(savCheckRow);
+      tf.appendChild(savCheckWrap);
+      tf._savDeduct=()=>savDeduct;
     }else{
       const{wrap:w,sel:s}=mkSel('Tipo trattenuta',DED_TYPES.map(t=>[t.id,t.icon+' '+t.name]),existing?.deductType||'trattenuta_730');
       tf.appendChild(w);tf._dedSel=s;
@@ -931,16 +952,20 @@ function openRecord(defaultType='expense',existing=null){
     if(!amount||isNaN(amount)){errEl.textContent='Importo non valido';errEl.style.display='block';return;}
     if(!descI.value.trim()){errEl.textContent='Descrizione mancante';errEl.style.display='block';return;}
     errEl.style.display='none';setLoading(saveBtn,true);
-    const rec={id:existing?.id||uid(),rtype:rtype.val,amount,description:descI.value.trim(),date:di.value,userId:userS.value,notes:notesI.value.trim(),sharedWith:[...sharedIds],sharedPcts:getSharedPcts(),categoryId:tf._catSel?.value||'',subcategory:tf._subSel?.value||'',detraibile730:tf._is730?tf._is730():false,incomeType:tf._incSel?.value||'stipendio',deductType:tf._dedSel?.value||'trattenuta_730',savingsType:tf._savSel?.value||'',savingsGoal:tf._savGoal?parseFloat(tf._savGoal.value)||0:0};
+    const rec={id:existing?.id||uid(),rtype:rtype.val,amount,description:descI.value.trim(),date:di.value,userId:userS.value,notes:notesI.value.trim(),sharedWith:[...sharedIds],sharedPcts:getSharedPcts(),categoryId:tf._catSel?.value||'',subcategory:tf._subSel?.value||'',detraibile730:tf._is730?tf._is730():false,incomeType:tf._incSel?.value||'stipendio',deductType:tf._dedSel?.value||'trattenuta_730',savingsType:tf._savSel?.value||'',savingsGoal:tf._savGoal?parseFloat(tf._savGoal.value)||0:0,savingsDeduct:tf._savDeduct?tf._savDeduct():false};
     try{
       await api({action:'saveRecord',token:S.group.token},{record:rec});
       const idx=S.records.findIndex(r=>r.id===rec.id);
       if(idx>=0)S.records[idx]=rec;else S.records.unshift(rec);
+      setLoading(saveBtn,false,isEdit?'Salva modifiche':'Aggiungi');
       closeModal();renderPage();
       showToast(isEdit?'✅ Modificato!':'✅ Aggiunto!','success');
     }catch(e){
       errEl.textContent='⚠ '+e.message;
       errEl.style.display='block';
+      setLoading(saveBtn,false,isEdit?'Salva modifiche':'Aggiungi');
+    }finally{
+      // Sicurezza — pulsante sempre resettato
       setLoading(saveBtn,false,isEdit?'Salva modifiche':'Aggiungi');
     }
   };
