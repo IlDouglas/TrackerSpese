@@ -303,19 +303,16 @@ async function api(params,body=null){
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),20000);
   try{
-    let res;
-    const qs=new URLSearchParams(params).toString();
+    // Tutto via GET — unico metodo che funziona con Apps Script senza CORS issues
+    const merged={...params};
     if(body){
-      // POST per operazioni di scrittura — evita limite URL GET
-      res=await fetch(`${url}?${qs}`,{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(body),
-        signal:controller.signal
-      });
-    }else{
-      res=await fetch(`${url}?${qs}`,{method:'GET',signal:controller.signal});
+      // Riduci payload al minimo — solo campi non vuoti
+      const slim={};
+      for(const k in body){if(body[k]!==null&&body[k]!==undefined&&body[k]!==''){slim[k]=body[k];}}
+      merged.payload=JSON.stringify(slim);
     }
+    const qs=new URLSearchParams(merged).toString();
+    const res=await fetch(`${url}?${qs}`,{method:'GET',signal:controller.signal});
     clearTimeout(timer);
     const text=await res.text();
     let data;
@@ -325,8 +322,8 @@ async function api(params,body=null){
     return data;
   }catch(e){
     clearTimeout(timer);
-    if(e.name==='AbortError')throw new Error('Timeout — il server non risponde. Riprova.');
-    if(e.message&&e.message.includes('fetch'))throw new Error('Connessione fallita. Riprova tra qualche secondo.');
+    if(e.name==='AbortError')throw new Error('Timeout — riprova.');
+    if(e.message&&e.message.includes('fetch'))throw new Error('Connessione fallita. Riprova.');
     throw e;
   }
 }
@@ -956,7 +953,13 @@ function openRecord(defaultType='expense',existing=null){
     errEl.style.display='none';setLoading(saveBtn,true);
     const rec={id:existing?.id||uid(),rtype:rtype.val,amount,description:descI.value.trim(),date:di.value,userId:userS.value,notes:notesI.value.trim(),sharedWith:[...sharedIds],sharedPcts:getSharedPcts(),categoryId:tf._catSel?.value||'',subcategory:tf._subSel?.value||'',detraibile730:tf._is730?tf._is730():false,incomeType:tf._incSel?.value||'stipendio',deductType:tf._dedSel?.value||'trattenuta_730',savingsType:tf._savSel?.value||'',savingsGoal:tf._savGoal?parseFloat(tf._savGoal.value)||0:0,savingsDeduct:tf._savDeduct?tf._savDeduct():false};
     try{
-      await api({action:'saveRecord',token:S.group.token},{record:rec});
+      // Rimuovi campi vuoti dal record per ridurre payload
+      const recSlim={};
+      for(const k in rec){if(rec[k]!==null&&rec[k]!==undefined&&rec[k]!==''){recSlim[k]=rec[k];}}
+      if(!recSlim.sharedWith||!recSlim.sharedWith.length)delete recSlim.sharedWith;
+      if(!recSlim.sharedPcts||!Object.keys(recSlim.sharedPcts).length)delete recSlim.sharedPcts;
+      if(!recSlim.savingsGoal)delete recSlim.savingsGoal;
+      await api({action:'saveRecord',token:S.group.token},{record:recSlim});
       const idx=S.records.findIndex(r=>r.id===rec.id);
       if(idx>=0)S.records[idx]=rec;else S.records.unshift(rec);
       setLoading(saveBtn,false,isEdit?'Salva modifiche':'Aggiungi');
