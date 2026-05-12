@@ -304,14 +304,16 @@ async function api(params,body=null){
   const timer=setTimeout(()=>controller.abort(),20000);
   try{
     let res;
+    const qs=new URLSearchParams(params).toString();
     if(body){
-      // Operazioni di scrittura: usa no-cors workaround via GET con payload
-      // Google Apps Script non supporta CORS su POST da browser
-      const merged={...params,payload:JSON.stringify(body)};
-      const qs=new URLSearchParams(merged).toString();
-      res=await fetch(`${url}?${qs}`,{method:'GET',signal:controller.signal});
+      // POST per operazioni di scrittura — evita limite URL GET
+      res=await fetch(`${url}?${qs}`,{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(body),
+        signal:controller.signal
+      });
     }else{
-      const qs=new URLSearchParams(params).toString();
       res=await fetch(`${url}?${qs}`,{method:'GET',signal:controller.signal});
     }
     clearTimeout(timer);
@@ -323,8 +325,8 @@ async function api(params,body=null){
     return data;
   }catch(e){
     clearTimeout(timer);
-    if(e.name==='AbortError')throw new Error('Timeout (20s) — il server non risponde. Riprova.');
-    if(e.message&&e.message.includes('fetch'))throw new Error('Connessione fallita. Verifica la connessione e riprova.');
+    if(e.name==='AbortError')throw new Error('Timeout — il server non risponde. Riprova.');
+    if(e.message&&e.message.includes('fetch'))throw new Error('Connessione fallita. Riprova tra qualche secondo.');
     throw e;
   }
 }
