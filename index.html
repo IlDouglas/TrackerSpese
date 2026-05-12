@@ -951,15 +951,27 @@ function openRecord(defaultType='expense',existing=null){
     if(!amount||isNaN(amount)){errEl.textContent='Importo non valido';errEl.style.display='block';return;}
     if(!descI.value.trim()){errEl.textContent='Descrizione mancante';errEl.style.display='block';return;}
     errEl.style.display='none';setLoading(saveBtn,true);
-    const rec={id:existing?.id||uid(),rtype:rtype.val,amount,description:descI.value.trim(),date:di.value,userId:userS.value,notes:notesI.value.trim(),sharedWith:[...sharedIds],sharedPcts:getSharedPcts(),categoryId:tf._catSel?.value||'',subcategory:tf._subSel?.value||'',detraibile730:tf._is730?tf._is730():false,incomeType:tf._incSel?.value||'stipendio',deductType:tf._dedSel?.value||'trattenuta_730',savingsType:tf._savSel?.value||'',savingsGoal:tf._savGoal?parseFloat(tf._savGoal.value)||0:0,savingsDeduct:tf._savDeduct?tf._savDeduct():false};
+    // Costruisci record minimo — solo campi con valori reali
+const pcts=getSharedPcts();
+const sharedArr=[...sharedIds];
+const rec={id:existing?.id||uid(),rtype:rtype.val,amount,description:descI.value.trim(),date:di.value,userId:userS.value};
+if(notesI.value.trim())rec.notes=notesI.value.trim();
+if(sharedArr.length){rec.sharedWith=sharedArr;if(Object.keys(pcts).length)rec.sharedPcts=pcts;}
+if(rtype.val==='expense'){
+  if(tf._catSel?.value)rec.categoryId=tf._catSel.value;
+  if(tf._subSel?.value)rec.subcategory=tf._subSel.value;
+  if(tf._is730&&tf._is730())rec.detraibile730=true;
+}else if(rtype.val==='income'){
+  rec.incomeType=tf._incSel?.value||'stipendio';
+}else if(rtype.val==='savings'){
+  rec.savingsType=tf._savSel?.value||'fondo_emergenza';
+  if(tf._savGoal&&parseFloat(tf._savGoal.value))rec.savingsGoal=parseFloat(tf._savGoal.value);
+  if(tf._savDeduct&&tf._savDeduct())rec.savingsDeduct=true;
+}else{
+  rec.deductType=tf._dedSel?.value||'trattenuta_730';
+}
     try{
-      // Rimuovi campi vuoti dal record per ridurre payload
-      const recSlim={};
-      for(const k in rec){if(rec[k]!==null&&rec[k]!==undefined&&rec[k]!==''){recSlim[k]=rec[k];}}
-      if(!recSlim.sharedWith||!recSlim.sharedWith.length)delete recSlim.sharedWith;
-      if(!recSlim.sharedPcts||!Object.keys(recSlim.sharedPcts).length)delete recSlim.sharedPcts;
-      if(!recSlim.savingsGoal)delete recSlim.savingsGoal;
-      await api({action:'saveRecord',token:S.group.token},{record:recSlim});
+      await api({action:'saveRecord',token:S.group.token},{record:rec});
       const idx=S.records.findIndex(r=>r.id===rec.id);
       if(idx>=0)S.records[idx]=rec;else S.records.unshift(rec);
       setLoading(saveBtn,false,isEdit?'Salva modifiche':'Aggiungi');
