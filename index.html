@@ -942,16 +942,17 @@ function openRecord(defaultType='expense',existing=null){
   wrap.appendChild(btnRow);
 
   saveBtn.onclick=async()=>{
+    try{
     const amount=parseFloat(ai.value);
     if(!amount||isNaN(amount)){errEl.textContent='Importo non valido';errEl.style.display='block';return;}
     if(!descI.value.trim()){errEl.textContent='Descrizione mancante';errEl.style.display='block';return;}
     errEl.style.display='none';setLoading(saveBtn,true);
     // Costruisci record minimo — solo campi con valori reali
-const pcts=getSharedPcts();
-const sharedArr=[...sharedIds];
+const pcts=typeof getSharedPcts==='function'?getSharedPcts():{};
+const sharedArr=sharedIds?[...sharedIds]:[];
 const rec={id:existing?.id||uid(),rtype:rtype.val,amount,description:descI.value.trim(),date:di.value,userId:userS.value};
-if(notesI.value.trim())rec.notes=notesI.value.trim();
-if(sharedArr.length){rec.sharedWith=sharedArr;if(Object.keys(pcts).length)rec.sharedPcts=pcts;}
+if(notesI.value&&notesI.value.trim())rec.notes=notesI.value.trim();
+if(sharedArr.length>0){rec.sharedWith=sharedArr;}
 if(rtype.val==='expense'){
   if(tf._catSel?.value)rec.categoryId=tf._catSel.value;
   if(tf._subSel?.value)rec.subcategory=tf._subSel.value;
@@ -975,7 +976,11 @@ if(rtype.val==='expense'){
       errEl.style.display='block';
       setLoading(saveBtn,false,isEdit?'Salva modifiche':'Aggiungi');
     }finally{
-      // Sicurezza — pulsante sempre resettato
+      setLoading(saveBtn,false,isEdit?'Salva modifiche':'Aggiungi');
+    }
+    }catch(outerErr){
+      errEl.textContent='⚠ Errore: '+outerErr.message;
+      errEl.style.display='block';
       setLoading(saveBtn,false,isEdit?'Salva modifiche':'Aggiungi');
     }
   };
