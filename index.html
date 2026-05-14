@@ -259,6 +259,7 @@ const DEFAULT_CATS=[
 ];
 const INC_TYPES=[{id:'stipendio',name:'Stipendio',icon:'💰'},{id:'bonus',name:'Bonus',icon:'⭐'},{id:'rimborso',name:'Rimborso',icon:'↩️'},{id:'730',name:'Rimborso 730',icon:'📋'},{id:'altro',name:'Altra Entrata',icon:'➕'}];
 const SAV_TYPES=[{id:'fondo_emergenza',name:'Fondo Emergenza',icon:'🛡️'},{id:'progetto',name:'Risparmio Progetto',icon:'🎯'},{id:'vacanza',name:'Vacanza',icon:'✈️'},{id:'investimento',name:'Investimento',icon:'📈'},{id:'altro',name:'Altro Risparmio',icon:'🐷'}];
+const SAV_MOVE_TYPES=[{id:'accantonamento',name:'Accantonamento',icon:'📥'},{id:'prelievo',name:'Prelievo da fondo',icon:'📤'}];
 const EMOJIS=['👍','❤️','😂','😮','😢','🔥','🎉','💸','🤑','👏'];
 const CAT_KW={auto:['benzina','carburante','gasolio','diesel','q8','eni','ip','tamoil','parcheggio','bollo','revisione','gomme','officina'],salute:['farmacia','medicinale','medico','dottore','dentista','visita','parrucchiere','barbiere','capelli','ottico'],svago:['pizza','pizzeria','ristorante','bar','caffè','caffe','cinema','birra','aperitivo','cena','pranzo','trattoria','kebab','sushi','pub','gelato'],generale:['supermercato','esselunga','lidl','conad','coop','pam','carrefour','eurospin','penny','aldi','decathlon','amazon'],casa:['affitto','bolletta','luce','gas','internet','wifi','condominio','ikea','ferramenta'],lavoro:['libro','corso','formazione','software','abbonamento']};
 
@@ -598,7 +599,7 @@ function mkFeedCard(record){
     const pct=record.sharedPcts?.[id];
     return {...u, pctLabel: pct?` ${pct}%`:''};
   }).filter(Boolean);
-  const tCol={expense:'var(--red)',income:'var(--green)',savings:'var(--blue)'}[record.rtype]||'var(--muted)';
+  const tCol=record.rtype==='savings'?(record.savingsMove==='prelievo'?'var(--red)':'var(--blue)'):({expense:'var(--red)',income:'var(--green)'}[record.rtype]||'var(--muted)');
   const icon=record.rtype==='expense'?(cat?.icon||'📦'):record.rtype==='income'?(INC_TYPES.find(t=>t.id===record.incomeType)?.icon||'💰'):record.rtype==='savings'?(SAV_TYPES.find(t=>t.id===record.savingsType)?.icon||'🐷'):'⚖️';
   const verb=record.rtype==='expense'?'ha speso':record.rtype==='income'?'ha ricevuto':record.rtype==='savings'?(record.savingsDeduct?'ha accantonato (−entrate)':'ha registrato risparmio'):'ha registrato';
   const card=el('div',{cls:'feed-card fade-up'});
@@ -810,7 +811,7 @@ function renderStats(){
   const savings=all.filter(r=>r.rtype==='savings');
   const tSav=savings.reduce((s,r)=>s+r.amount,0);
   const allSavings=S.records.filter(r=>r.rtype==='savings'&&(f.user==='all'||r.userId===f.user));
-  const patrimonio=allSavings.reduce((s,r)=>s+r.amount,0);
+  const patrimonio=allSavings.reduce((s,r)=>r.savingsMove==='prelievo'?s-r.amount:s+r.amount,0);
   const tE=expenses.reduce((s,r)=>{
     // Se filtro per utente e spesa è condivisa, usa solo la % dell'utente
     if(f.user!=='all'&&r.sharedWith?.includes(f.user)){
@@ -819,13 +820,21 @@ function renderStats(){
     }
     return s+r.amount;
   },0),tI=incomes.reduce((s,r)=>s+r.amount,0),tD=0;
-  const tSavDeduct=savings.filter(r=>r.savingsDeduct).reduce((s,r)=>s+r.amount,0);
-  const net=tI,bal=net-tE-tSavDeduct,t730=expenses.filter(r=>r.detraibile730).reduce((s,r)=>s+r.amount,0);
+  // Accantonamenti che sottraggono dalle entrate
+  const tSavDeduct=savings.filter(r=>r.savingsDeduct&&r.savingsMove!=='prelievo').reduce((s,r)=>s+r.amount,0);
+  // Prelievi da fondo aumentano la liquidità disponibile
+  const tSavPrelievo=savings.filter(r=>r.savingsMove==='prelievo').reduce((s,r)=>s+r.amount,0);
+  const net=tI+tSavPrelievo,bal=net-tE-tSavDeduct,t730=expenses.filter(r=>r.detraibile730).reduce((s,r)=>s+r.amount,0);
   // KPI
   // Savings KPI
   const savCard=el('div',{cls:'card',css:'background:#60a5fa0d;border:1.5px solid #60a5fa33;margin-bottom:10px'});
-  savCard.innerHTML='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px"><div><p class="stitle" style="color:var(--blue)">Patrimonio risparmi</p><p style="font-size:26px;font-weight:800;color:var(--blue)">'+eur(patrimonio)+'</p><p style="font-size:11px;color:var(--muted);margin-top:4px">totale accumulato</p></div><div style="font-size:36px">🐷</div></div>'+(tSav>0?'<div style="padding-top:10px;border-top:1px solid var(--border)"><p style="font-size:11px;color:var(--muted)">Nel periodo selezionato</p><p style="font-size:16px;font-weight:700;color:var(--blue);margin-top:3px">+'+eur(tSav)+'</p></div>':'');
-  if(tSav>0) pg.appendChild(savCard);
+  const accPeriodo=savings.filter(r=>r.savingsMove!=='prelievo').reduce((s,r)=>s+r.amount,0);
+  const prePeriodo=savings.filter(r=>r.savingsMove==='prelievo').reduce((s,r)=>s+r.amount,0);
+  let savDetail='';
+  if(accPeriodo>0)savDetail+='<p style="font-size:12px;color:var(--muted)">Accantonato: <strong style="color:var(--blue)">+'+eur(accPeriodo)+'</strong></p>';
+  if(prePeriodo>0)savDetail+='<p style="font-size:12px;color:var(--muted);margin-top:4px">Prelevato: <strong style="color:var(--red)">-'+eur(prePeriodo)+'</strong></p>';
+  savCard.innerHTML='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px"><div><p class="stitle" style="color:var(--blue)">Patrimonio risparmi</p><p style="font-size:26px;font-weight:800;color:var(--blue)">'+eur(patrimonio)+'</p><p style="font-size:11px;color:var(--muted);margin-top:4px">totale accumulato</p></div><div style="font-size:36px">🐷</div></div>'+(savDetail?'<div style="padding-top:10px;border-top:1px solid var(--border)">'+savDetail+'</div>':'');
+  pg.appendChild(savCard);
 
   const krow=el('div',{css:'display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px'});
   krow.innerHTML=`<div class="card" style="background:#4ade800d;border:1.5px solid #4ade8033;margin:0"><p class="stitle" style="color:var(--green)">Entrate</p><p style="font-size:22px;font-weight:800;color:var(--green)">${eur(net)}</p><p style="font-size:11px;color:var(--muted);margin-top:4px">lordo ${eur(tI)}</p></div><div class="card" style="background:#f871710d;border:1.5px solid #f8717133;margin:0"><p class="stitle" style="color:var(--red)">Spese</p><p style="font-size:22px;font-weight:800;color:var(--red)">${eur(tE)}</p><p style="font-size:11px;color:var(--muted);margin-top:4px">${expenses.length} voci</p></div>`;
@@ -920,6 +929,18 @@ function openRecord(defaultType='expense',existing=null){
       // Obiettivo opzionale
       const{wrap:gw,inp:gi}=mkInp('Obiettivo (€, opzionale)',{type:'number',min:'0',placeholder:'es. 1000',value:existing?.savingsGoal||''});
       tf.appendChild(gw);tf._savGoal=gi;
+      // Tipo movimento
+      const movWrap=el('div',{cls:'field'});
+      movWrap.appendChild(el('label',{cls:'lbl'},'Tipo movimento'));
+      const movRow=el('div',{css:'display:flex;gap:8px'});
+      let savMove=existing?.savingsMove||'accantonamento';
+      SAV_MOVE_TYPES.forEach(m=>{
+        const btn=el('button',{css:`flex:1;padding:10px;border-radius:var(--rs);cursor:pointer;font-size:12px;font-weight:700;background:${savMove===m.id?'#60a5fa22':'var(--surf)'};color:${savMove===m.id?'var(--blue)':'var(--muted)'};border:1.5px solid ${savMove===m.id?'#60a5fa66':'var(--border)'}`,onclick:()=>{savMove=m.id;movRow.querySelectorAll('button').forEach(b=>{b.style.background='var(--surf)';b.style.color='var(--muted)';b.style.borderColor='var(--border)';});btn.style.background='#60a5fa22';btn.style.color='var(--blue)';btn.style.borderColor='#60a5fa66';}},m.icon+' '+m.name);
+        movRow.appendChild(btn);
+      });
+      movWrap.appendChild(movRow);
+      tf.appendChild(movWrap);
+      tf._savMove=()=>savMove;
       // Sottrai dalle entrate?
       const savCheckWrap=el('div',{cls:'field'});
       savCheckWrap.appendChild(el('label',{cls:'lbl'},'Sottrai dalle entrate?'));
@@ -963,6 +984,7 @@ if(rtype.val==='expense'){
   rec.savingsType=tf._savSel?.value||'fondo_emergenza';
   if(tf._savGoal&&parseFloat(tf._savGoal.value))rec.savingsGoal=parseFloat(tf._savGoal.value);
   if(tf._savDeduct&&tf._savDeduct())rec.savingsDeduct=true;
+  rec.savingsMove=tf._savMove?tf._savMove():'accantonamento';
 }
     try{
       await api({action:'saveRecord',token:S.group.token},{record:rec});
