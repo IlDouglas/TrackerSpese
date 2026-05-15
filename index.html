@@ -745,8 +745,8 @@ function renderList(){
   function applyList(){
     const filtered=S.records.filter(r=>{
       if(f.type!=='all'&&r.rtype!==f.type)return false;
-      if(f.cat!=='all'&&r.rtype==='expense'&&r.categoryId!==f.cat)return false;
-      if(f.sub!=='all'&&r.subcategory!==f.sub)return false;
+      if(f.cat!=='all'&&(r.rtype!=='expense'||r.categoryId!==f.cat))return false;
+      if(f.sub!=='all'&&(r.rtype!=='expense'||r.subcategory!==f.sub))return false;
       if(f.user!=='all'&&r.userId!==f.user)return false;
       if(f.search&&!r.description.toLowerCase().includes(f.search.toLowerCase()))return false;
       return true;
@@ -854,19 +854,27 @@ function renderStats(){
   pg.appendChild(tCard);
   // By cat
   const byCat=S.categories.map(c=>({...c,total:expenses.filter(r=>r.categoryId===c.id).reduce((s,r)=>s+r.amount,0)})).filter(c=>c.total>0).sort((a,b)=>b.total-a.total);
-  if(byCat.length>0){
+  {
     const maxC=Math.max(...byCat.map(c=>c.total),1);
     const cCard=el('div',{cls:'card'});cCard.innerHTML='<p class="stitle">Per categoria</p>';
     const cPills=el('div',{cls:'pill-row',css:'margin-bottom:14px'});
     [['all','Tutte'],...S.categories.map(c=>[c.id,c.icon+' '+c.name])].forEach(([v,l])=>{const cat=S.categories.find(x=>x.id===v);const p=el('button',{cls:'pill'+(f.cat===v?' on':''),onclick:()=>{f.cat=v;renderStats();}},l);if(f.cat===v&&v!=='all'&&cat)p.style.cssText+=`;border-color:${cat.color};background:${cat.color}22;color:${cat.color}`;cPills.appendChild(p);});
     cCard.appendChild(cPills);
-    byCat.forEach(c=>{const row=el('div',{css:'margin-bottom:12px'});row.innerHTML=`<div style="display:flex;justify-content:space-between;margin-bottom:5px"><span style="font-size:13px">${c.icon} ${c.name}</span><span style="font-size:13px;color:${c.color};font-weight:800">${eur(c.total)}</span></div><div class="stat-bar"><div class="stat-fill" style="width:${(c.total/maxC)*100}%;background:${c.color}"></div></div>`;cCard.appendChild(row);});
+    if(byCat.length===0){
+      cCard.innerHTML+='<p style="color:var(--muted);font-size:13px">Nessuna spesa in questa categoria nel periodo</p>';
+    }else{
+      byCat.forEach(c=>{const row=el('div',{css:'margin-bottom:12px'});row.innerHTML=`<div style="display:flex;justify-content:space-between;margin-bottom:5px"><span style="font-size:13px">${c.icon} ${c.name}</span><span style="font-size:13px;color:${c.color};font-weight:800">${eur(c.total)}</span></div><div class="stat-bar"><div class="stat-fill" style="width:${(c.total/maxC)*100}%;background:${c.color}"></div></div>`;cCard.appendChild(row);});
+    }
     pg.appendChild(cCard);
   }
   // By user
   if(S.users.length>1){
-    const byU=S.users.map(u=>({...u,total:expenses.filter(r=>r.userId===u.id).reduce((s,r)=>s+r.amount,0),count:expenses.filter(r=>r.userId===u.id).length})).filter(u=>u.total>0);
-    if(byU.length>0){const uCard=el('div',{cls:'card'});uCard.innerHTML='<p class="stitle">Per persona</p>';byU.forEach(u=>{const row=el('div',{css:'display:flex;align-items:center;gap:12px;margin-bottom:10px'});ap(row,mkAvatar(u,28),el('span',{css:'flex:1;font-size:13px;font-weight:600'},u.name),el('span',{css:'font-size:11px;color:var(--muted)'},u.count+' voci'),el('span',{css:`font-size:14px;font-weight:800;color:${u.color}`},eur(u.total)));uCard.appendChild(row);});pg.appendChild(uCard);}
+    const byU=S.users.map(u=>({...u,total:expenses.filter(r=>r.userId===u.id).reduce((s,r)=>s+r.amount,0),count:expenses.filter(r=>r.userId===u.id).length}));
+    {const uCard=el('div',{cls:'card'});uCard.innerHTML='<p class="stitle">Per persona</p>';
+    const byUF=byU.filter(u=>u.total>0);
+    if(byUF.length===0){uCard.innerHTML+='<p style="color:var(--muted);font-size:13px">Nessuna spesa nel periodo</p>';}
+    else{byUF.forEach(u=>{const row=el('div',{css:'display:flex;align-items:center;gap:12px;margin-bottom:10px'});ap(row,mkAvatar(u,28),el('span',{css:'flex:1;font-size:13px;font-weight:600'},u.name),el('span',{css:'font-size:11px;color:var(--muted)'},u.count+' voci'),el('span',{css:`font-size:14px;font-weight:800;color:${u.color}`},eur(u.total)));uCard.appendChild(row);});}
+    pg.appendChild(uCard);}
   }
 }
 
