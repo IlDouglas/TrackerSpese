@@ -852,20 +852,32 @@ function renderStats(){
   trend.forEach(t=>{const col=el('div',{css:'flex:1;display:flex;flex-direction:column;align-items:center;gap:3px'});const segs=el('div',{css:'width:100%;display:flex;gap:2px;align-items:flex-end;height:60px'});const iH=Math.max((t.inc/maxT)*60,t.inc>0?3:0),eH=Math.max((t.exp/maxT)*60,t.exp>0?3:0);ap(segs,el('div',{css:`flex:1;background:#4ade8055;border-radius:2px 2px 0 0;height:${iH}px`}),el('div',{css:`flex:1;background:#f8717155;border-radius:2px 2px 0 0;height:${eH}px`}));ap(col,segs,el('span',{css:'font-size:9px;color:var(--muted)'},t.label));tRow.appendChild(col);});
   tCard.appendChild(tRow);tCard.innerHTML+='<div style="display:flex;gap:14px;margin-top:10px"><span style="font-size:11px;color:var(--green)">▬ Entrate</span><span style="font-size:11px;color:var(--red)">▬ Spese</span></div>';
   pg.appendChild(tCard);
-  // By cat
+  // By cat — pill filtro separati dalla card risultati
   const byCat=S.categories.map(c=>({...c,total:expenses.filter(r=>r.categoryId===c.id).reduce((s,r)=>s+r.amount,0)})).filter(c=>c.total>0).sort((a,b)=>b.total-a.total);
   {
-    const maxC=Math.max(...byCat.map(c=>c.total),1);
-    const cCard=el('div',{cls:'card'});cCard.innerHTML='<p class="stitle">Per categoria</p>';
-    const cPills=el('div',{cls:'pill-row',css:'margin-bottom:14px'});
-    [['all','Tutte'],...S.categories.map(c=>[c.id,c.icon+' '+c.name])].forEach(([v,l])=>{const cat=S.categories.find(x=>x.id===v);const p=el('button',{cls:'pill'+(f.cat===v?' on':''),onclick:()=>{f.cat=v;renderStats();}},l);if(f.cat===v&&v!=='all'&&cat)p.style.cssText+=`;border-color:${cat.color};background:${cat.color}22;color:${cat.color}`;cPills.appendChild(p);});
-    cCard.appendChild(cPills);
+    // Card filtro categoria (sempre visibile)
+    const catFilterCard=el('div',{cls:'card'});
+    catFilterCard.innerHTML='<p class="stitle">Per categoria</p>';
+    const cPills=el('div',{cls:'pill-row',css:'margin-bottom:0'});
+    [['all','Tutte'],...S.categories.map(c=>[c.id,c.icon+' '+c.name])].forEach(([v,l])=>{
+      const cat=S.categories.find(x=>x.id===v);
+      const p=el('button',{cls:'pill'+(f.cat===v?' on':''),onclick:()=>{f.cat=v;renderStats();}},l);
+      if(f.cat===v&&v!=='all'&&cat)p.style.cssText+=`;border-color:${cat.color};background:${cat.color}22;color:${cat.color}`;
+      cPills.appendChild(p);
+    });
+    catFilterCard.appendChild(cPills);
+    pg.appendChild(catFilterCard);
+    // Card risultati (solo se ci sono dati)
     if(byCat.length===0){
-      cCard.innerHTML+='<p style="color:var(--muted);font-size:13px">Nessuna spesa in questa categoria nel periodo</p>';
+      const emptyCard=el('div',{cls:'card'});
+      emptyCard.innerHTML='<p style="color:var(--muted);font-size:13px">Nessuna spesa in questa categoria nel periodo selezionato</p>';
+      pg.appendChild(emptyCard);
     }else{
-      byCat.forEach(c=>{const row=el('div',{css:'margin-bottom:12px'});row.innerHTML=`<div style="display:flex;justify-content:space-between;margin-bottom:5px"><span style="font-size:13px">${c.icon} ${c.name}</span><span style="font-size:13px;color:${c.color};font-weight:800">${eur(c.total)}</span></div><div class="stat-bar"><div class="stat-fill" style="width:${(c.total/maxC)*100}%;background:${c.color}"></div></div>`;cCard.appendChild(row);});
+      const maxC=Math.max(...byCat.map(c=>c.total),1);
+      const resCard=el('div',{cls:'card'});
+      byCat.forEach(c=>{const row=el('div',{css:'margin-bottom:12px'});row.innerHTML=`<div style="display:flex;justify-content:space-between;margin-bottom:5px"><span style="font-size:13px">${c.icon} ${c.name}</span><span style="font-size:13px;color:${c.color};font-weight:800">${eur(c.total)}</span></div><div class="stat-bar"><div class="stat-fill" style="width:${(c.total/maxC)*100}%;background:${c.color}"></div></div>`;resCard.appendChild(row);});
+      pg.appendChild(resCard);
     }
-    pg.appendChild(cCard);
   }
   // By user
   if(S.users.length>1){
